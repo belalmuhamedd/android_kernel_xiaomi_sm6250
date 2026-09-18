@@ -2299,7 +2299,9 @@ ifeq ($(CONFIG_WLAN_FEATURE_DP_RX_THREADS), y)
 OBJS += $(TXRX3.0_OBJS)
 endif
 
-ccflags-y += $(sort $(INCS))
+QCACLD_INCS_RSP := $(objtree)/.qcacld-includes.rsp
+$(file >$(QCACLD_INCS_RSP),$(sort $(INCS)))
+ccflags-y += @$(QCACLD_INCS_RSP)
 
 cppflags-y +=	-DANI_OS_TYPE_ANDROID=6 \
 		-Wall\
