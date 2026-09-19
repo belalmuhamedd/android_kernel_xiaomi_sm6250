@@ -34,6 +34,7 @@
 //  SHA3_HMAC - HMAC using SHA3-256
 #include "ucl_sha3.h"
 #include <linux/string.h>
+#include <linux/slab.h>
 #define SHA3_256_HMAC
 #include "sha384_software.h"
 
@@ -62,48 +63,57 @@
 int sha3_256_hmac(unsigned char *key, int key_len, unsigned char *message, int msg_len, unsigned char *mac)
 {
 	int i;
-	unsigned char thash[256];
-	unsigned char tmac[256];
-	unsigned char cat_input_thash[1024];
-	unsigned char cat_input_final[1024];
-
+	struct sha3_hmac_ctx {
+		unsigned char thash[32];
+		unsigned char tmac[32];
+		unsigned char cat_input_thash[136 + 512];
+		unsigned char cat_input_final[136 + 32];
+		unsigned char opad[136];
+		unsigned char ipad[136];
+	} *ctx;
 	int blocksize = 136;
 	int hashsize = 32;
-	unsigned char opad[136];
-	unsigned char ipad[136];
+	int ret = 0;
 
-	memset(opad, 0x5C, blocksize);
-	memset(ipad, 0x36, blocksize);
+	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	if (!ctx)
+		return 0;
+
+	memset(ctx->opad, 0x5C, blocksize);
+	memset(ctx->ipad, 0x36, blocksize);
 
 	//  Check to see if key is larger then blocksize
 	if (key_len > blocksize)
-		return 0;  // Not supported
+		goto out;  // Not supported
 
 	// check for blocks too big
 	if (msg_len > 512)
-		return 0;
+		goto out;
 
 	// Loop through bytes of ipad/opad and XOR with key
 	for (i = 0; i < key_len; i++) {
 		// XOR ipad with key
-		ipad[i] ^= key[i];
+		ctx->ipad[i] ^= key[i];
 		// XOR opad with key
-		opad[i] ^= key[i];
+		ctx->opad[i] ^= key[i];
 	}
 
 	// thash = hash(ipad || message)
-	memcpy(cat_input_thash, ipad, blocksize);
-	memcpy(&cat_input_thash[blocksize], message, msg_len);
+	memcpy(ctx->cat_input_thash, ctx->ipad, blocksize);
+	memcpy(&ctx->cat_input_thash[blocksize], message, msg_len);
 
-	ucl_sha3_256(thash, cat_input_thash, blocksize + msg_len);
+	ucl_sha3_256(ctx->thash, ctx->cat_input_thash, blocksize + msg_len);
 
 	// return hash(opad || thash)
-	memcpy(cat_input_final, opad, blocksize);
-	memcpy(&cat_input_final[blocksize], thash, hashsize);
+	memcpy(ctx->cat_input_final, ctx->opad, blocksize);
+	memcpy(&ctx->cat_input_final[blocksize], ctx->thash, hashsize);
 
-	ucl_sha3_256(tmac, cat_input_final, blocksize + hashsize);
+	ucl_sha3_256(ctx->tmac, ctx->cat_input_final, blocksize + hashsize);
 
-	memcpy(mac, tmac, hashsize);
+	memcpy(mac, ctx->tmac, hashsize);
 
-	return 1;
+	ret = 1;
+out:
+	kfree(ctx);
+	return ret;
 }
